@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: CRM observability
+    orgId: 1
+    folder: CRM Care
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

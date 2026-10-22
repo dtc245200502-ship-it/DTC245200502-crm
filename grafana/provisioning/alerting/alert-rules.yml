@@ -1,0 +1,59 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: crm-http-alerts
+    folder: CRM Care
+    interval: 1m
+    rules:
+      - uid: crm-http-5xx-rate
+        title: HTTP 5xx rate above 5%
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: 100 * sum(rate(crm_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(crm_http_requests_total[5m])), 0.001)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 5
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: Tỷ lệ HTTP 5xx của CRM vượt quá 5%
+          description: Tỷ lệ request HTTP 5xx vượt ngưỡng 5% liên tục trong 5 phút. Kiểm tra dashboard Grafana và log ứng dụng trong Loki.
+        labels:
+          service: crm-backend
+          severity: warning
