@@ -1,0 +1,24 @@
+{
+  "name": "crm-customer-care",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CRM cham soc khach hang voi PostgreSQL, Nginx, Prometheus, Grafana va Loki",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --check server.js && node --check public/app.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "express-validator": "^7.2.1",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1",
+    "prom-client": "^15.1.3",
+    "winston": "^3.17.0"
+  }
+}

@@ -1,0 +1,199 @@
+name: crm-customer-care
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-crmdb}
+      POSTGRES_USER: ${POSTGRES_USER:-crmuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ChangeThis_DB_Password_2026}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      # Biến mặc định của pg
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-crmdb}
+      PGUSER: ${POSTGRES_USER:-crmuser}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-ChangeThis_DB_Password_2026}
+      # Biến alias bổ sung phòng trường hợp app gọi DB_HOST / DATABASE_URL
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-crmdb}
+      DB_DATABASE: ${POSTGRES_DB:-crmdb}
+      DB_USER: ${POSTGRES_USER:-crmuser}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-ChangeThis_DB_Password_2026}
+      DATABASE_URL: postgres://${POSTGRES_USER:-crmuser}:${POSTGRES_PASSWORD:-ChangeThis_DB_Password_2026}@db:5432/${POSTGRES_DB:-crmdb}
+      CRM_ADMIN_USER: ${CRM_ADMIN_USER:-admin}
+      CRM_ADMIN_PASSWORD: ${CRM_ADMIN_PASSWORD:-Admin123!}
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deployment}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - crm-logs:/app/logs
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - backend
+      - observability
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+
+  nginx:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx-logfiles:/var/log/crm-nginx
+    depends_on:
+      - app
+    networks:
+      - frontend
+      - backend
+
+  pgadmin:
+    image: dpage/pgadmin4:9
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-ChangeThis_pgAdmin_Password}
+      PGADMIN_LISTEN_PORT: 8080
+    ports:
+      - "5050:8080"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - app
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-ChangeThis_Grafana_Password}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3001}
+      GF_SMTP_ENABLED: "true"
+      GF_SMTP_HOST: smtp.gmail.com:587
+      GF_SMTP_USER: ${GRAFANA_SMTP_USER:-}
+      GF_SMTP_PASSWORD: ${GRAFANA_SMTP_PASSWORD:-}
+      GF_SMTP_FROM_ADDRESS: ${GRAFANA_SMTP_FROM_ADDRESS:-}
+      GF_SMTP_FROM_NAME: CRM Care Grafana
+      GF_SMTP_STARTTLS_POLICY: MandatoryStartTLS
+      GRAFANA_ALERT_EMAIL: ${GRAFANA_ALERT_EMAIL:-}
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+
+  loki:
+    image: grafana/loki:3.5.3
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./loki/config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+
+  promtail:
+    image: grafana/promtail:3.5.3
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yml:ro
+      - crm-logs:/var/log/crm:ro
+      - nginx-logfiles:/var/log/crm-nginx:ro
+      - promtail-positions:/tmp
+    depends_on:
+      - app
+      - loki
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  frontend: {}
+  backend: {}
+  observability: {}
+
+volumes:
+  db-data: {}
+  pgadmin-data: {}
+  prometheus-data: {}
+  grafana-data: {}
+  loki-data: {}
+  crm-logs: {}
+  nginx-logfiles: {}
+  promtail-positions: {}
